@@ -1,0 +1,105 @@
+## Cargo libreria
+library(tidyverse)
+
+## Creo el objeto atlas_data donde importo la base Atlas de CAF
+atlas_data <- read_csv("data/m4_atlas_argentina.csv")
+
+
+## Exploración
+
+# Estructura de las columnas
+
+glimpse(atlas_data)
+
+# Estadísticos descriptivos
+
+summary(atlas_data)
+
+# Verificación de NAs ordenadas de mayor a menor
+
+tabla_nas <- atlas_data %>%
+  summarise(across(everything(), ~sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "total_nas") %>%
+  mutate(porcentaje = (total_nas / nrow(atlas_data)) * 100) %>%
+  arrange(desc(total_nas))
+
+# Nivel de dispersión de los datos
+
+tabla_dispersion <- atlas_data %>%
+  summarise(across(where(is.numeric), ~sd(., na.rm = TRUE))) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "desviacion_estandar") %>%
+  arrange(desc(desviacion_estandar))
+
+# Grafico el desvío estándar para mejor visualización de los datos (sin población, hogares y año de referencia del dato de población)
+# Armo tabla de la distribución de los desvíos para observar dónde hacer los cortes de las categorías
+
+distribucion_desvios <- atlas_data %>%
+  summarise(across(where(is.numeric), ~sd(., na.rm = TRUE))) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "desviacion") %>%
+  filter(!variable %in% c("poblacion", "hogares", "poblacion_anio"))
+
+summary(distribucion_desvios$desviacion)
+
+# Clasificación basada en los cuartiles de la base
+desvios_categorizados <- distribucion_desvios %>%
+  mutate(categoria = case_when(
+    desviacion >= 0.1963 ~ "Alta Heterogeneidad",
+    desviacion <= 0.0649 ~ "Baja Heterogeneidad",
+    TRUE                 ~ "Heterogeneidad Media"
+  )) %>%
+  arrange(desc(desviacion))
+
+print(desvios_categorizados)
+
+
+# Grafico la clasificación de variables 
+plot_heterogeneidad <- ggplot(desvios_categorizados, aes(x = reorder(variable, desviacion), y = desviacion, fill = categoria)) +
+  geom_col() +
+  coord_flip() + # Para que los nombres de las variables se lean bien
+  scale_fill_manual(values = c(
+    "Alta Heterogeneidad" = "#51127c",
+    "Heterogeneidad Media" = "#b63679",
+    "Baja Heterogeneidad" = "#fb8861"
+  )) +
+  labs(
+    title = "Brechas Territoriales en Municipios Argentinos",
+    subtitle = "Clasificación de indicadores según su desviación estándar (N=2344)",
+    x = "Indicador Social",
+    y = "Desviación Estándar",
+    fill = "Nivel de Heterogeneidad"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") 
+
+## Descripción 
+La base posee 2344 filas (municipios) y 31 columnas. 
+Del total de 32 variables existen 20 con valores faltantes (NAs). Sin embargo, esas faltantes siempre están por debajo del 4,56% (107 NAs). La variable con más faltantes es en la Tasa de Desempleo de Mujeres Adultas. La cantidad de faltantes resulta poco significativa.
+En cuanto a la dispersión de los datos, es esperable que sean las variables de población y de cantidad de hogares las que muestren mayor variabilidad. Para lograr una lectura más ordenada de los datos, quitamos las variables de población, hogar y año y categorizamos los desvíos por nivel de heterogeneidad: Alta (violeta), Baja (lila) y Media (salmón). La mayor heterogeneidad entre municipios se observa en los indicadores de planificación urbana: proporción de hogares con servicio de recolección de residuos sólidos, proporción de hogares con acceso a agua mejorada, proporción de población que reside en zonas urbanas, proporción de hogares con acceso a servicios de saneamiento mejorado. En esta categoría también está incluida la dispersión entre municipios que cuentan con información disponible para indicadores asociados a ODS, que muestra una heterogeneidad de 0,20 desvíos estándar. Sin embargo, al ser dicotómica se recomienda su exclusión en la etapa de clustering para evitar distorciones o su tratamiento de manera diferencial. La mayor homoneidad entre municipios se encuentra en las tasas de desempleo (el total de las personas adultas y el de las mujeres y varones por separado), en el indicador de alfabetismo y en la proporción de la población que se identifica como indígena.
+
+
+## Correlaciones
+
+# Cargo la libreria
+install.packages("ggcorrplot")
+library(ggcorrplot)
+
+# Preparo los datos sacando las variables sin variabilidad
+datos_para_corr <- atlas_data %>%
+  select(where(is.numeric)) %>%
+  select(-poblacion, -hogares, -poblacion_anio, -codigo_nivel, -tiene_ods) %>% 
+  drop_na() 
+
+# Calculo la matriz nuevamente
+matriz_correlacion <- cor(datos_para_corr)
+
+# Grafico la matriz
+plot_correlacion <- ggcorrplot(matriz_correlacion, 
+                               hc.order = TRUE,   
+                               type = "lower",    
+                               lab = TRUE,        
+                               lab_size = 2.5,      
+                               colors = c("#51127c", "white", "#fb8861"), 
+                               title = "Matriz de Correlación: Indicadores de Bienestar",
+                               ggtheme = theme_minimal()) +
+  theme(axis.text.x = element_text(size = 8, angle = 90),
+        axis.text.y = element_text(size = 8))
